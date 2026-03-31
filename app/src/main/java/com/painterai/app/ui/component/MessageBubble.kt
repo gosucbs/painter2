@@ -36,7 +36,7 @@ fun MessageBubble(message: Message, modifier: Modifier = Modifier) {
     ) {
         Column(
             modifier = Modifier
-                .widthIn(max = 300.dp)
+                .fillMaxWidth(if (isUser) 0.85f else 0.95f)
                 .clip(
                     RoundedCornerShape(
                         topStart = 12.dp,

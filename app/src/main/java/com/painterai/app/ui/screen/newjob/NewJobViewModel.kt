@@ -74,7 +74,7 @@ class NewJobViewModel @Inject constructor(
                 vehicleModel = state.vehicleModel,
                 vehicleYear = state.vehicleYear.toIntOrNull(),
                 colorCode = state.colorCode,
-                paintBrand = "KCC_SUMIX",
+                paintBrand = if (state.paintBrand == "노루 워터큐") "NOROO_WATERQ" else "KCC_SUMIX",
                 workArea = state.workArea.ifBlank { null },
                 notes = state.notes.ifBlank { null }
             )

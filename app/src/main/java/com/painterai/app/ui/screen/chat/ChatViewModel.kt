@@ -8,6 +8,7 @@ import com.painterai.app.data.remote.dto.*
 import com.painterai.app.data.repository.ConversationRepository
 import com.painterai.app.data.repository.JobRepository
 import com.painterai.app.domain.model.*
+import kotlinx.serialization.json.buildJsonArray
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -94,7 +95,7 @@ class ChatViewModel @Inject constructor(
             val apiMessages = updatedMessages.map { msg ->
                 ChatMessage(
                     role = if (msg.role == MessageRole.USER) "user" else "assistant",
-                    content = listOf(ContentBlock.Text(msg.content))
+                    content = buildJsonArray { add(ContentBlocks.text(msg.content)) }
                 )
             }
 

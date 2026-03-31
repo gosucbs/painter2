@@ -18,7 +18,8 @@ data class Job(
 )
 
 enum class PaintBrand(val displayName: String) {
-    KCC_SUMIX("KCC 수믹스");
+    KCC_SUMIX("KCC 수믹스"),
+    NOROO_WATERQ("노루 워터큐");
 
     companion object {
         fun fromString(value: String): PaintBrand =

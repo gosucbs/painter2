@@ -6,8 +6,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.painterai.app.data.remote.ClaudeApiService
 import com.painterai.app.data.remote.dto.*
+import android.content.Context
 import com.painterai.app.data.repository.ConversationRepository
 import com.painterai.app.data.repository.JobRepository
+import com.painterai.app.data.repository.PhotoRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.serialization.json.buildJsonArray
 import com.painterai.app.domain.model.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -16,23 +20,25 @@ import javax.inject.Inject
 
 data class AnalysisUiState(
     val job: Job? = null,
-    val stdSpecimenUri: Uri? = null,
+    val vehiclePhotoUri: Uri? = null,
     val sampleSpecimenUri: Uri? = null,
-    val stdRecipeUri: Uri? = null,
     val sampleRecipeUri: Uri? = null,
     val analysisResult: String? = null,
     val isAnalyzing: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
-    val conversationId: String? = null
+    val conversationId: String? = null,
+    val isSaved: Boolean = false
 )
 
 @HiltViewModel
 class AnalysisViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
+    @ApplicationContext private val context: Context,
     private val jobRepository: JobRepository,
     private val claudeApiService: ClaudeApiService,
-    private val conversationRepository: ConversationRepository
+    private val conversationRepository: ConversationRepository,
+    private val photoRepository: PhotoRepository
 ) : ViewModel() {
 
     private val jobId: String = savedStateHandle["jobId"] ?: ""
@@ -73,16 +79,12 @@ class AnalysisViewModel @Inject constructor(
         }
     }
 
-    fun onStdSpecimenSelected(uri: Uri) {
-        _uiState.update { it.copy(stdSpecimenUri = uri) }
+    fun onVehiclePhotoSelected(uri: Uri) {
+        _uiState.update { it.copy(vehiclePhotoUri = uri) }
     }
 
     fun onSampleSpecimenSelected(uri: Uri) {
         _uiState.update { it.copy(sampleSpecimenUri = uri) }
-    }
-
-    fun onStdRecipePhotoSelected(uri: Uri) {
-        _uiState.update { it.copy(stdRecipeUri = uri) }
     }
 
     fun onSampleRecipePhotoSelected(uri: Uri) {
@@ -101,19 +103,13 @@ class AnalysisViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isAnalyzing = true, error = null, analysisResult = null) }
 
-            val contentBlocks = mutableListOf<ContentBlock>()
-
-            // 이미지 추가
-            imageBase64List.forEach { base64 ->
-                contentBlocks.add(ContentBlock.Image(ImageSource(data = base64)))
+            // 사진 Supabase Storage에 업로드
+            val photoTypes = listOf("vehicle" to state.vehiclePhotoUri, "sample" to state.sampleSpecimenUri, "recipe" to state.sampleRecipeUri)
+            for ((type, uri) in photoTypes) {
+                if (uri != null) {
+                    photoRepository.uploadPhoto(context, jobId, "anonymous", uri, type)
+                }
             }
-
-            // 텍스트 프롬프트
-            val labels = mutableListOf<String>()
-            if (state.stdSpecimenUri != null) labels.add("STD 시편")
-            if (state.sampleSpecimenUri != null) labels.add("조색 시편")
-            if (state.stdRecipeUri != null) labels.add("STD 배합표")
-            if (state.sampleRecipeUri != null) labels.add("조색 배합표")
 
             val prompt = buildString {
                 appendLine("## 작업 정보")
@@ -122,16 +118,24 @@ class AnalysisViewModel @Inject constructor(
                 appendLine("도료사: ${job.paintBrand.displayName}")
                 appendLine()
                 appendLine("## 첨부 사진 (순서대로)")
-                labels.forEachIndexed { i, label -> appendLine("${i + 1}. $label") }
+                appendLine("1. 차량사진 (목표 색상)")
+                appendLine("2. 조색시편사진 (현재 조색 결과)")
+                appendLine("3. 조색시편배합 (현재 배합표)")
                 appendLine()
-                appendLine("위 사진들을 보고 STD와 조색 시편을 3각도(15°/45°/105°) 기준으로 비교 분석해주세요.")
-                appendLine("배합표 사진에서 토너 코드와 g수를 읽어서 어떤 토너가 부족하거나 과다한지 알려주세요.")
+                appendLine("조색 시편이 차량 색상에 더 가까워지려면 어떻게 해야 하는지 분석해주세요.")
+                appendLine("45°/105°/15° 각도별 차이, Delta 값을 추정하고,")
+                appendLine("KCC SUMIX 토너 코드 기준으로 어떤 토너를 증량/감량해야 하는지 구체적으로 알려주세요.")
             }
 
-            contentBlocks.add(ContentBlock.Text(prompt))
+            val contentArray = buildJsonArray {
+                imageBase64List.forEach { base64 ->
+                    add(ContentBlocks.image(base64))
+                }
+                add(ContentBlocks.text(prompt))
+            }
 
             val request = AnalyzeRequest(
-                messages = listOf(ChatMessage(role = "user", content = contentBlocks)),
+                messages = listOf(ChatMessage(role = "user", content = contentArray)),
                 jobId = jobId
             )
 
@@ -157,6 +161,12 @@ class AnalysisViewModel @Inject constructor(
     fun saveJobResult(result: JobResult) {
         viewModelScope.launch {
             jobRepository.updateJobResult(jobId, result.name.lowercase())
+                .onSuccess {
+                    _uiState.update { it.copy(isSaved = true) }
+                }
+                .onFailure { e ->
+                    _uiState.update { it.copy(error = "저장 실패: ${e.message}") }
+                }
         }
     }
 }

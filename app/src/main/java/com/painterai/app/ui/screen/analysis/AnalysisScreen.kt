@@ -1,9 +1,13 @@
 package com.painterai.app.ui.screen.analysis
 
 import android.Manifest
+import android.content.ContentValues
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -54,10 +58,9 @@ fun AnalysisScreen(
 
     fun setPhotoForSlot(slot: Int, uri: Uri) {
         when (slot) {
-            0 -> viewModel.onStdSpecimenSelected(uri)
+            0 -> viewModel.onVehiclePhotoSelected(uri)
             1 -> viewModel.onSampleSpecimenSelected(uri)
-            2 -> viewModel.onStdRecipePhotoSelected(uri)
-            3 -> viewModel.onSampleRecipePhotoSelected(uri)
+            2 -> viewModel.onSampleRecipePhotoSelected(uri)
         }
     }
 
@@ -71,11 +74,36 @@ fun AnalysisScreen(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? -> uri?.let { setPhotoForSlot(activeSlot, it) } }
 
+    // 갤러리에 사진 저장
+    fun saveToGallery(uri: Uri) {
+        try {
+            val contentValues = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, "PainterAI_${System.currentTimeMillis()}.jpg")
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/PainterAI")
+            }
+            val resolver = context.contentResolver
+            val galleryUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            if (galleryUri != null) {
+                resolver.openInputStream(uri)?.use { input ->
+                    resolver.openOutputStream(galleryUri)?.use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // 갤러리 저장 실패해도 앱 동작에는 영향 없음
+        }
+    }
+
     // 카메라 런처
     val cameraLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success: Boolean ->
-        if (success) cameraUri?.let { setPhotoForSlot(activeSlot, it) }
+        if (success) cameraUri?.let {
+            saveToGallery(it)
+            setPhotoForSlot(activeSlot, it)
+        }
     }
 
     // 카메라 권한 런처
@@ -106,11 +134,36 @@ fun AnalysisScreen(
     fun uriToBase64(uri: Uri): String? {
         return try {
             val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-            val bitmap = BitmapFactory.decodeStream(inputStream)
+            val bytes = inputStream.readBytes()
             inputStream.close()
+
+            val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+
+            // 긴 변이 1024px로 리사이즈 (API 전송 크기 줄이기)
+            val maxSize = 1024
+            val ratio = minOf(maxSize.toFloat() / original.width, maxSize.toFloat() / original.height, 1f)
+            val resized = if (ratio < 1f) {
+                android.graphics.Bitmap.createScaledBitmap(
+                    original,
+                    (original.width * ratio).toInt(),
+                    (original.height * ratio).toInt(),
+                    true
+                )
+            } else {
+                original
+            }
+
+            // 항상 JPEG로 변환
             val outputStream = ByteArrayOutputStream()
-            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, outputStream)
-            Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+            resized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
+            val jpegBytes = outputStream.toByteArray()
+
+            // JPEG 매직바이트 확인 (FF D8)
+            if (jpegBytes.size < 2 || jpegBytes[0] != 0xFF.toByte() || jpegBytes[1] != 0xD8.toByte()) {
+                return null
+            }
+
+            Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
         } catch (e: Exception) {
             null
         }
@@ -179,46 +232,26 @@ fun AnalysisScreen(
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            Text("시편 사진", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 PhotoSlot(
-                    label = "STD 시편",
-                    uri = uiState.stdSpecimenUri,
+                    label = "차량사진",
+                    uri = uiState.vehiclePhotoUri,
                     onClick = { activeSlot = 0; showPickerDialog = true },
                     modifier = Modifier.weight(1f)
                 )
                 PhotoSlot(
-                    label = "조색 시편",
+                    label = "조색시편사진",
                     uri = uiState.sampleSpecimenUri,
                     onClick = { activeSlot = 1; showPickerDialog = true },
                     modifier = Modifier.weight(1f)
                 )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text("배합표 사진", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
                 PhotoSlot(
-                    label = "STD 배합",
-                    uri = uiState.stdRecipeUri,
-                    onClick = { activeSlot = 2; showPickerDialog = true },
-                    modifier = Modifier.weight(1f)
-                )
-                PhotoSlot(
-                    label = "조색 배합",
+                    label = "조색시편배합",
                     uri = uiState.sampleRecipeUri,
-                    onClick = { activeSlot = 3; showPickerDialog = true },
+                    onClick = { activeSlot = 2; showPickerDialog = true },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -228,15 +261,17 @@ fun AnalysisScreen(
             Button(
                 onClick = {
                     val images = listOfNotNull(
-                        uiState.stdSpecimenUri?.let { uriToBase64(it) },
+                        uiState.vehiclePhotoUri?.let { uriToBase64(it) },
                         uiState.sampleSpecimenUri?.let { uriToBase64(it) },
-                        uiState.stdRecipeUri?.let { uriToBase64(it) },
                         uiState.sampleRecipeUri?.let { uriToBase64(it) }
                     )
                     viewModel.analyzeWithPhotos(images)
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !uiState.isAnalyzing
+                    && uiState.vehiclePhotoUri != null
+                    && uiState.sampleSpecimenUri != null
+                    && uiState.sampleRecipeUri != null
             ) {
                 if (uiState.isAnalyzing) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -267,10 +302,7 @@ fun AnalysisScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            uiState.analysisResult!!,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        AnalysisResultText(uiState.analysisResult!!)
                     }
                 }
 
@@ -289,13 +321,31 @@ fun AnalysisScreen(
                         Text("추가 질문")
                     }
 
-                    Button(
-                        onClick = { viewModel.saveJobResult(JobResult.SUCCESS) },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("작업 저장")
+                    if (uiState.isSaved) {
+                        Button(
+                            onClick = onBack,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary
+                            )
+                        ) {
+                            Text("저장 완료 - 돌아가기")
+                        }
+                    } else {
+                        // 성공 저장
+                        Button(
+                            onClick = { viewModel.saveJobResult(JobResult.SUCCESS) },
+                            modifier = Modifier.weight(0.5f)
+                        ) {
+                            Text("성공 저장")
+                        }
+                        // 실패 저장
+                        OutlinedButton(
+                            onClick = { viewModel.saveJobResult(JobResult.FAIL) },
+                            modifier = Modifier.weight(0.5f)
+                        ) {
+                            Text("실패 저장")
+                        }
                     }
                 }
             }
@@ -346,6 +396,97 @@ private fun PhotoSlot(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("촬영", style = MaterialTheme.typography.bodySmall)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalysisResultText(text: String) {
+    val lines = text.split("\n")
+    Column(modifier = Modifier.fillMaxWidth()) {
+        for (line in lines) {
+            when {
+                // ### 제목 (h3)
+                line.startsWith("### ") -> {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = line.removePrefix("### "),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+                // ## 제목 (h2)
+                line.startsWith("## ") -> {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = line.removePrefix("## "),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+                // 구분선
+                line.startsWith("---") -> {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                // 불릿 항목 (- 텍스트)
+                line.trimStart().startsWith("- ") -> {
+                    val indent = line.length - line.trimStart().length
+                    val content = line.trimStart().removePrefix("- ")
+                    Row(
+                        modifier = Modifier.padding(start = (indent * 4 + 8).dp, top = 2.dp, bottom = 2.dp)
+                    ) {
+                        Text("•", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 6.dp))
+                        Text(
+                            text = content,
+                            style = MaterialTheme.typography.bodySmall,
+                            lineHeight = MaterialTheme.typography.bodySmall.lineHeight
+                        )
+                    }
+                }
+                // 볼드 텍스트 (**text**)
+                line.contains("**") -> {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    val parts = line.split("**")
+                    androidx.compose.foundation.text.BasicText(
+                        text = buildAnnotatedString(parts),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.padding(vertical = 1.dp)
+                    )
+                }
+                // 빈 줄
+                line.isBlank() -> {
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+                // 일반 텍스트
+                else -> {
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(vertical = 1.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun buildAnnotatedString(parts: List<String>): androidx.compose.ui.text.AnnotatedString {
+    return androidx.compose.ui.text.buildAnnotatedString {
+        parts.forEachIndexed { index, part ->
+            if (index % 2 == 1) {
+                // 볼드
+                pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
+                append(part)
+                pop()
+            } else {
+                append(part)
             }
         }
     }

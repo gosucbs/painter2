@@ -114,6 +114,13 @@ fun NewJobScreen(
                             viewModel.onBrandExpandedChanged(false)
                         }
                     )
+                    DropdownMenuItem(
+                        text = { Text("노루 워터큐") },
+                        onClick = {
+                            viewModel.onPaintBrandChanged("노루 워터큐")
+                            viewModel.onBrandExpandedChanged(false)
+                        }
+                    )
                 }
             }
 
