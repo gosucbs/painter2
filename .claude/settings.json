@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/Administrator/workspace/oilcheck -name *.env* -o -name *config* -type f)",
+      "Bash(./gradlew assembleDebug)",
+      "Bash(export JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\")",
+      "WebFetch(domain:www.data.go.kr)",
+      "WebFetch(domain:apis.data.go.kr)",
+      "Bash(curl -s \"https://apis.data.go.kr/1613000/TrainInfoService/getStrtpntAlocFndTrainInfo?serviceKey=a44d88d0edf147b6bcae176809eb9a81843f722739f98e70a96a360e830070a1&depPlaceId=NAT013271&arrPlaceId=NAT630129&depPlandTime=20260320&numOfRows=50&_type=json\")",
+      "Bash(curl -s \"https://apis.data.go.kr/1613000/TrainInfoService/getStrtpntAlocFndTrainInfo?serviceKey=a44d88d0edf147b6bcae176809eb9a81843f722739f98e70a96a360e830070a1&depPlaceId=NAT750046&arrPlaceId=NAT630129&depPlandTime=20260320&numOfRows=50&_type=json\")",
+      "Bash(curl -s \"https://apis.data.go.kr/1613000/TrainInfoService/getStrtpntAlocFndTrainInfo?serviceKey=a44d88d0edf147b6bcae176809eb9a81843f722739f98e70a96a360e830070a1&depPlaceId=NAT601936&arrPlaceId=NAT630129&depPlandTime=20260320&numOfRows=50&_type=json\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Administrator\\.claude\\plans"
+    ]
+  }
+}
